@@ -1,5 +1,5 @@
-import requests
 import streamlit as st
+from groq import Groq
 
 # -----------------------------
 # Page Config
@@ -51,16 +51,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------
-# Ollama Settings
+# Sidebar Settings
 # -----------------------------
-OLLAMA_URL = "http://localhost:11434/api/chat"
-
 with st.sidebar:
     st.title("⚙️ Settings")
 
+    groq_api_key = st.text_input(
+        "Groq API Key",
+        type="password",
+        placeholder="Enter your Groq API key..."
+    )
+
     model = st.selectbox(
-        "Choose Ollama Model",
-        ["llama3.2", "llama3.1", "llama3", "mistral", "gemma2", "qwen2.5", "qwen2.5:3b"],
+        "Choose Model",
+        ["llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
         index=0
     )
 
@@ -84,36 +88,30 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
-    st.markdown("### Teaching Notes")
-    st.markdown("- Ollama runs model locally")
-    st.markdown("- No OpenAI credits needed")
-    st.markdown("- Token = word chunk")
+    st.markdown("### Notes")
+    st.markdown("- Groq runs models in the cloud")
+    st.markdown("- Get free API key at console.groq.com")
     st.markdown("- Temperature = creativity dial")
     st.markdown("- LLMs are stateless unless we send history")
 
 # -----------------------------
-# Helper Function
+# Check API Key
 # -----------------------------
-def check_ollama_running():
-    try:
-        response = requests.get("http://localhost:11434", timeout=3)
-        return response.status_code == 200
-    except requests.exceptions.RequestException:
-        return False
+if not groq_api_key:
+    st.warning("👈 Please enter your Groq API key in the sidebar to start chatting.")
+    st.markdown("Get a free API key at [console.groq.com](https://console.groq.com)")
+    st.stop()
+
+# -----------------------------
+# Init Groq Client
+# -----------------------------
+client = Groq(api_key=groq_api_key)
 
 # -----------------------------
 # Session State / Memory
 # -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
-# -----------------------------
-# Ollama Health Check
-# -----------------------------
-if not check_ollama_running():
-    st.error("Ollama is not running. Please open terminal and run: ollama serve")
-    st.info("Then pull a model using: ollama pull llama3.2")
-    st.stop()
 
 # -----------------------------
 # Show Chat History
@@ -130,13 +128,12 @@ user_prompt = st.chat_input("Ask anything... Try Telugu also: 'Generative AI ant
 if user_prompt:
     # 1. Display user message
     st.session_state.messages.append({"role": "user", "content": user_prompt})
-
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
-    # 2. Build full messages list for Ollama
-    messages_for_ollama = [{"role": "system", "content": system_prompt}]
-    messages_for_ollama.extend(st.session_state.messages)
+    # 2. Build messages list
+    messages_for_groq = [{"role": "system", "content": system_prompt}]
+    messages_for_groq.extend(st.session_state.messages)
 
     # 3. Stream assistant response
     with st.chat_message("assistant"):
@@ -144,46 +141,25 @@ if user_prompt:
         full_response = ""
 
         try:
-            payload = {
-                "model": model,
-                "messages": messages_for_ollama,
-                "stream": True,
-                "options": {
-                    "temperature": temperature
-                }
-            }
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages_for_groq,
+                temperature=temperature,
+                stream=True,
+                max_tokens=1024
+            )
 
-            with requests.post(OLLAMA_URL, json=payload, stream=True, timeout=120) as response:
-                response.raise_for_status()
-
-                for line in response.iter_lines():
-                    if line:
-                        data = line.decode("utf-8")
-                        import json
-                        chunk = json.loads(data)
-
-                        if "message" in chunk and "content" in chunk["message"]:
-                            content = chunk["message"]["content"]
-                            full_response += content
-                            response_placeholder.markdown(full_response + "▌")
-
-                        if chunk.get("done", False):
-                            break
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    full_response += content
+                    response_placeholder.markdown(full_response + "▌")
 
             response_placeholder.markdown(full_response)
-
-        except requests.exceptions.HTTPError as e:
-            full_response = (
-                f"HTTP Error: {str(e)}\n\n"
-                f"Most likely the model '{model}' is not downloaded.\n\n"
-                f"Run this command in terminal:\n\n"
-                f"ollama pull {model}"
-            )
-            response_placeholder.error(full_response)
 
         except Exception as e:
             full_response = f"Error: {str(e)}"
             response_placeholder.error(full_response)
 
-    # 4. Store assistant response in memory
+    # 4. Store assistant response
     st.session_state.messages.append({"role": "assistant", "content": full_response})
