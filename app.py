@@ -5,7 +5,7 @@ from groq import Groq
 # Page Config
 # -----------------------------
 st.set_page_config(
-    page_title="HarsH AI - Ollama ChatGPT Clone",
+    page_title="HarsH AI - Local AI Chatbot",
     page_icon="🤖",
     layout="centered"
 )
@@ -45,10 +45,24 @@ st.markdown("""
 st.markdown("""
 <div class="hero-card">
     <div class="brand-title">HarsH AI <span class="green">:Local AI Chatbot</span></div>
-    <div class="brand-subtitle">Hii Iam HarsH.Ask me Anything.</div>
-    <div class="small-note">I Can help you in the form of text </div>
+    <div class="brand-subtitle">Hii I am HarsH. Ask me Anything.</div>
+    <div class="small-note">I can help you in the form of text</div>
 </div>
 """, unsafe_allow_html=True)
+
+# -----------------------------
+# Load API Key from Secrets
+# -----------------------------
+try:
+    groq_api_key = st.secrets["GROQ_API_KEY"]
+except Exception:
+    st.error("❌ API key not found. Please add GROQ_API_KEY to your Streamlit secrets.")
+    st.stop()
+
+# -----------------------------
+# Init Groq Client
+# -----------------------------
+client = Groq(api_key=groq_api_key)
 
 # -----------------------------
 # Sidebar Settings
@@ -56,15 +70,14 @@ st.markdown("""
 with st.sidebar:
     st.title("⚙️ Settings")
 
-    groq_api_key = st.text_input(
-        "Groq API Key",
-        type="password",
-        placeholder="Enter your Groq API key..."
-    )
-
     model = st.selectbox(
         "Choose Model",
-        ["llama-3.3-70b-versatile","llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
+        [
+            "llama-3.3-70b-versatile",   # Best overall
+            "llama-3.1-8b-instant",      # Fast & lightweight
+            "gemma2-9b-it",              # Google Gemma
+            "mixtral-8x7b-32768",        # Long context
+        ],
         index=0
     )
 
@@ -77,35 +90,31 @@ with st.sidebar:
         help="0 = focused/robotic, 1 = creative"
     )
 
+    max_tokens = st.slider(
+        "Max Response Length",
+        min_value=256,
+        max_value=4096,
+        value=1024,
+        step=256,
+        help="Higher = longer responses"
+    )
+
     system_prompt = st.text_area(
         "System Prompt",
         value="You are a helpful AI assistant. Explain concepts clearly and simply. When useful, respond with examples.",
         height=120
     )
 
-    if st.button("Clear Chat"):
+    if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
         st.rerun()
 
     st.markdown("---")
-    st.markdown("### Notes")
-    st.markdown("- Groq runs models in the cloud")
-    st.markdown("- Get free API key at console.groq.com")
-    st.markdown("- Temperature = creativity dial")
-    st.markdown("- LLMs are stateless unless we send history")
-
-# -----------------------------
-# Check API Key
-# -----------------------------
-if not groq_api_key:
-    st.warning("👈 Please enter your Groq API key in the sidebar to start chatting.")
-    st.markdown("Get a free API key at [console.groq.com](https://console.groq.com)")
-    st.stop()
-
-# -----------------------------
-# Init Groq Client
-# -----------------------------
-client = Groq(api_key=groq_api_key)
+    st.markdown("### ℹ️ Notes")
+    st.markdown("- Powered by *Groq* cloud inference")
+    st.markdown("- Temperature controls creativity")
+    st.markdown("- Telugu language supported ✅")
+    st.markdown("- Chat history kept during session")
 
 # -----------------------------
 # Session State / Memory
@@ -126,6 +135,10 @@ for message in st.session_state.messages:
 user_prompt = st.chat_input("Ask anything... Try Telugu also: 'Generative AI ante enti?'")
 
 if user_prompt:
+    # Trim history to last 20 messages to avoid token overflow
+    if len(st.session_state.messages) > 20:
+        st.session_state.messages = st.session_state.messages[-20:]
+
     # 1. Display user message
     st.session_state.messages.append({"role": "user", "content": user_prompt})
     with st.chat_message("user"):
@@ -146,7 +159,7 @@ if user_prompt:
                 messages=messages_for_groq,
                 temperature=temperature,
                 stream=True,
-                max_tokens=1024
+                max_tokens=max_tokens
             )
 
             for chunk in stream:
@@ -158,7 +171,7 @@ if user_prompt:
             response_placeholder.markdown(full_response)
 
         except Exception as e:
-            full_response = f"Error: {str(e)}"
+            full_response = f"⚠️ Error: {str(e)}"
             response_placeholder.error(full_response)
 
     # 4. Store assistant response
